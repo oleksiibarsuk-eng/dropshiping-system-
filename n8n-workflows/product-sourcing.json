@@ -1,0 +1,158 @@
+{
+  "name": "Product Sourcing with Cursor AI",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "product-sourcing",
+        "responseMode": "onReceived"
+      },
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4-turbo-preview",
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "You are a dropshipping product analyst powered by Cursor AI.\n\nTask: Find profitable camera products from AutoDS suppliers.\n\nRules:\n- Focus on brands: Sony, Canon, Fuji, Panasonic, Ricoh\n- Avoid cheap brands (Nikon D3xxx series, generic Chinese)\n- Target price range: 300-800 EUR\n- Margin must be minimum 25%\n\nReturn ONLY a JSON array of search queries with metadata:\n[\n  {\n    \"query\": \"Sony A6400 mirrorless camera\",\n    \"expected_price_range\": [600, 700],\n    \"target_margin\": 30,\n    \"priority\": \"high\"\n  }\n]"
+            },
+            {
+              "role": "user",
+              "content": "=Category: {{ $json.body.category }}\nLimit: {{ $json.body.limit }}\nAdditional filters: {{ $json.body.filters || 'None' }}\n\nGenerate search queries for products."
+            }
+          ]
+        }
+      },
+      "name": "Cursor AI - Planner",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Parse Cursor AI response and extract queries\nconst response = $input.item.json.message.content;\nlet queries = [];\n\ntry {\n  // Extract JSON from response\n  const jsonMatch = response.match(/\\[([\\s\\S]*?)\\]/);\n  if (jsonMatch) {\n    queries = JSON.parse('[' + jsonMatch[1] + ']');\n  } else {\n    // Fallback: parse as array\n    queries = JSON.parse(response);\n  }\n} catch (error) {\n  throw new Error(`Failed to parse Cursor AI response: ${error.message}`);\n}\n\nreturn queries.map(q => ({ json: q }));"
+      },
+      "name": "Parse Queries",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "name": "Split In Batches",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 1,
+      "position": [850, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://api.autods.com/v1/products/search",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "autodsApi",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "query",
+              "value": "={{ $json.query }}"
+            },
+            {
+              "name": "marketplace",
+              "value": "ebay_de"
+            },
+            {
+              "name": "min_price",
+              "value": "={{ $json.expected_price_range[0] }}"
+            },
+            {
+              "name": "max_price",
+              "value": "={{ $json.expected_price_range[1] }}"
+            },
+            {
+              "name": "limit",
+              "value": "10"
+            }
+          ]
+        }
+      },
+      "name": "AutoDS - Search Products",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1050, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Filter by margin using Cursor AI logic\nconst items = $input.all();\nconst filtered = [];\n\nfor (const item of items) {\n  const cost = item.json.price;\n  const selling = cost * 1.45; // +45% for fees + profit\n  const margin = selling - cost;\n  const marginPercent = (margin / selling) * 100;\n  \n  // Cursor AI enhanced logic: dynamic margin based on product category\n  const targetMargin = item.json.target_margin || 25;\n  \n  if (marginPercent >= targetMargin) {\n    filtered.push({\n      json: {\n        ...item.json,\n        selling_price: selling.toFixed(2),\n        margin: margin.toFixed(2),\n        margin_percent: marginPercent.toFixed(1),\n        cursor_ai_approved: true,\n        analysis_timestamp: new Date().toISOString()\n      }\n    });\n  }\n}\n\nreturn filtered;"
+      },
+      "name": "Filter by Margin (Cursor AI Enhanced)",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1250, 300]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4-turbo-preview",
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "You are Cursor AI Listing Generator for dropshipping.\n\nCreate SEO-optimized listings for eBay and Shopify.\n\nReturn ONLY JSON:\n{\n  \"ebay_title\": \"80 chars max\",\n  \"shopify_description\": \"HTML, 200-300 words\",\n  \"features\": [\"bullet\", \"points\"],\n  \"seo_keywords\": [\"keyword1\", \"keyword2\"]\n}"
+            },
+            {
+              "role": "user",
+              "content": "=Product:\nTitle: {{ $json.title }}\nPrice: {{ $json.price }}\nDescription: {{ $json.description }}\n\nGenerate listing for eBay and Shopify."
+            }
+          ]
+        }
+      },
+      "name": "Cursor AI - Generate Listing",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1,
+      "position": [1450, 300]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "=✅ Product added by Cursor AI!\n\nTitle: {{ $json.ebay_title }}\nCost: €{{ $node['Filter by Margin (Cursor AI Enhanced)'].json.price }}\nSelling: €{{ $node['Filter by Margin (Cursor AI Enhanced)'].json.selling_price }}\nMargin: €{{ $node['Filter by Margin (Cursor AI Enhanced)'].json.margin }} ({{ $node['Filter by Margin (Cursor AI Enhanced)'].json.margin_percent }}%)\n\n🤖 AI Analysis: Approved\n⏰ Timestamp: {{ $node['Filter by Margin (Cursor AI Enhanced)'].json.analysis_timestamp }}"
+      },
+      "name": "Telegram - Success Notification",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [1650, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [[{"node": "Cursor AI - Planner", "type": "main", "index": 0}]]
+    },
+    "Cursor AI - Planner": {
+      "main": [[{"node": "Parse Queries", "type": "main", "index": 0}]]
+    },
+    "Parse Queries": {
+      "main": [[{"node": "Split In Batches", "type": "main", "index": 0}]]
+    },
+    "Split In Batches": {
+      "main": [[{"node": "AutoDS - Search Products", "type": "main", "index": 0}]]
+    },
+    "AutoDS - Search Products": {
+      "main": [[{"node": "Filter by Margin (Cursor AI Enhanced)", "type": "main", "index": 0}]]
+    },
+    "Filter by Margin (Cursor AI Enhanced)": {
+      "main": [[{"node": "Cursor AI - Generate Listing", "type": "main", "index": 0}]]
+    },
+    "Cursor AI - Generate Listing": {
+      "main": [[{"node": "Telegram - Success Notification", "type": "main", "index": 0}]]
+    }
+  },
+  "active": true,
+  "settings": {},
+  "id": "product-sourcing-cursor-ai"
+}

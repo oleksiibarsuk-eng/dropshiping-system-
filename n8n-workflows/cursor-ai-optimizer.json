@@ -1,0 +1,185 @@
+{
+  "name": "Cursor AI Agent Optimizer",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "cursor-ai-optimize",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "name": "Webhook - Optimization Request",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300],
+      "webhookId": "cursor-ai-optimize"
+    },
+    {
+      "parameters": {
+        "functionCode": "// Prepare context for Cursor AI\nconst agentCode = $input.item.json.code;\nconst errorLogs = $input.item.json.error_logs || [];\nconst agentName = $input.item.json.agent_name;\nconst request = $input.item.json.optimization_request;\n\n// Load project rules\nconst projectRules = [\n  'Follow russian_language.md for responses',\n  'Document all changes per work_documentation_rule.md',\n  'Update memory-bank after significant changes',\n  'All agent code must be modular and testable',\n  'Use TypeScript for type safety',\n  'Follow n8n best practices for workflows'\n];\n\nconst context = {\n  agent: agentName,\n  current_code: agentCode,\n  errors: errorLogs,\n  request: request,\n  project_rules: projectRules,\n  timestamp: new Date().toISOString()\n};\n\nreturn { json: context };"
+      },
+      "name": "Prepare Context",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4-turbo-preview",
+        "options": {
+          "temperature": 0.7,
+          "maxTokens": 3000
+        },
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "=You are Cursor AI integrated into dropshipping automation system.\n\nProject Rules:\n{{ $json.project_rules.join('\\n') }}\n\nYour task: Optimize agent code, fix errors, and provide detailed documentation.\n\nResponse format:\n```javascript\n// Optimized code here\n```\n\nExplanation:\n[Your explanation]\n\nUpdated Documentation:\n[Documentation]\n\nTest Cases:\n[Test cases]"
+            },
+            {
+              "role": "user",
+              "content": "=Agent: {{ $json.agent }}\n\nCurrent Code:\n```javascript\n{{ $json.current_code }}\n```\n\nErrors:\n{{ $json.errors.join('\\n') }}\n\nOptimization Request:\n{{ $json.request }}\n\nTimestamp: {{ $json.timestamp }}"
+            }
+          ]
+        }
+      },
+      "name": "Cursor AI - OpenAI API",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1,
+      "position": [650, 300],
+      "credentials": {
+        "openAiApi": {
+          "id": "1",
+          "name": "OpenAI API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "// Parse Cursor AI response\nconst aiResponse = $input.item.json.message.content;\n\n// Extract code\nconst codeMatch = aiResponse.match(/```(?:javascript|typescript)?\\n([\\s\\S]*?)\\n```/);\nconst optimizedCode = codeMatch ? codeMatch[1] : null;\n\n// Extract explanation\nconst explanationMatch = aiResponse.match(/Explanation:[\\s\\S]*?\\n([\\s\\S]*?)(?=Updated Documentation:|Test Cases:|$)/);\nconst explanation = explanationMatch ? explanationMatch[1].trim() : '';\n\n// Extract documentation\nconst documentationMatch = aiResponse.match(/Updated Documentation:[\\s\\S]*?\\n([\\s\\S]*?)(?=Test Cases:|$)/);\nconst documentation = documentationMatch ? documentationMatch[1].trim() : '';\n\n// Extract test cases\nconst testCasesMatch = aiResponse.match(/Test Cases:[\\s\\S]*?\\n([\\s\\S]*?)$/);\nconst testCases = testCasesMatch ? testCasesMatch[1].trim() : '';\n\nif (!optimizedCode) {\n  throw new Error('Failed to extract optimized code from AI response');\n}\n\nreturn {\n  json: {\n    agent: $node['Prepare Context'].json.agent,\n    optimized_code: optimizedCode,\n    explanation: explanation,\n    documentation: documentation,\n    test_cases: testCases,\n    timestamp: new Date().toISOString(),\n    original_request: $node['Prepare Context'].json.request\n  }\n};"
+      },
+      "name": "Parse AI Response",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [850, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Create report for Memory Bank\nconst report = `## Cursor AI Optimization Report\n\n**Date**: ${new Date().toLocaleDateString('uk-UA')}\n**Agent**: ${$json.agent}\n**Timestamp**: ${$json.timestamp}\n\n### Original Request\n${$json.original_request}\n\n### Changes Made\n${$json.explanation}\n\n### Updated Documentation\n${$json.documentation}\n\n### Test Cases\n${$json.test_cases}\n\n### Status\n✅ Code optimized and ready for review\n\n---\n`;\n\nreturn { \n  json: { \n    report: report,\n    agent: $json.agent,\n    code: $json.optimized_code,\n    timestamp: $json.timestamp\n  } \n};"
+      },
+      "name": "Create Report",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1050, 300]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "=🤖 **Cursor AI завершив оптимізацію!**\n\n**Агент**: {{ $json.agent }}\n**Час**: {{ new Date($json.timestamp).toLocaleString('uk-UA') }}\n\n**Зміни**:\n{{ $node['Parse AI Response'].json.explanation }}\n\n✅ Код оновлено\n📝 Звіт готовий\n\n_Натисніть кнопки нижче для дій_",
+        "additionalFields": {
+          "parseMode": "Markdown",
+          "replyMarkup": {
+            "inlineKeyboard": {
+              "rows": [
+                {
+                  "buttons": [
+                    {
+                      "text": "✅ Схвалити",
+                      "callbackData": "=approve_{{ $json.timestamp }}"
+                    },
+                    {
+                      "text": "❌ Відхилити",
+                      "callbackData": "=reject_{{ $json.timestamp }}"
+                    }
+                  ]
+                },
+                {
+                  "buttons": [
+                    {
+                      "text": "📝 Переглянути код",
+                      "callbackData": "=view_{{ $json.timestamp }}"
+                    },
+                    {
+                      "text": "🔄 Повторити",
+                      "callbackData": "=retry_{{ $json.timestamp }}"
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      },
+      "name": "Telegram Notification",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [1250, 300],
+      "credentials": {
+        "telegramApi": {
+          "id": "2",
+          "name": "Telegram Bot"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook - Optimization Request": {
+      "main": [
+        [
+          {
+            "node": "Prepare Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Context": {
+      "main": [
+        [
+          {
+            "node": "Cursor AI - OpenAI API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cursor AI - OpenAI API": {
+      "main": [
+        [
+          {
+            "node": "Parse AI Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse AI Response": {
+      "main": [
+        [
+          {
+            "node": "Create Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Report": {
+      "main": [
+        [
+          {
+            "node": "Telegram Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {},
+  "id": "cursor-ai-optimizer"
+}

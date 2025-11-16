@@ -1,0 +1,74 @@
+---
+description: Стандарты для работы с API интеграциями (eBay, Shopify, Meta, AutoDS, Supabase)
+globs: ["n8n-workflows/**/*.json", "scripts/**/*.js", "scripts/**/*.ts"]
+alwaysApply: false
+---
+
+# Стандарты API интеграций
+
+## Обработка ошибок
+
+Все API вызовы должны:
+1. Логировать ошибки в Supabase (таблица errors)
+2. Отправлять критические уведомления через Telegram Bot
+3. Использовать retry механизмы с exponential backoff
+4. Обрабатывать rate limits корректно
+
+## Аутентификация
+
+- Все API ключи и токены должны браться из хранилища секретов
+- Никогда не хардкодить секреты в код
+- Использовать переменные окружения или конфигурационные файлы (не коммитить реальные значения)
+
+## Структура ошибок
+
+При логировании ошибок в Supabase используйте следующую структуру:
+```json
+{
+  "error_type": "API Error",
+  "error_message": "Описание ошибки",
+  "component": "Название компонента (eBay, Shopify, etc.)",
+  "context": {
+    "endpoint": "URL endpoint",
+    "method": "HTTP метод",
+    "status_code": 500
+  }
+}
+```
+
+## Rate Limits
+
+- Всегда проверяйте rate limits перед массовыми запросами
+- Используйте очереди для управления нагрузкой
+- Реализуйте backoff стратегии при достижении лимитов
+
+## Мониторинг
+
+- Логируйте все важные события (создание листинга, размещение заказа, ошибки)
+- Отслеживайте метрики использования API
+- Настройте алерты для критических событий
+
+## Примеры обработки
+
+```javascript
+// Пример обработки ошибки с логированием
+try {
+  const response = await apiCall();
+  return response;
+} catch (error) {
+  // Логирование в Supabase
+  await logError({
+    error_type: 'API Error',
+    error_message: error.message,
+    component: 'eBay',
+    context: { endpoint, method }
+  });
+  
+  // Уведомление в Telegram для критических ошибок
+  if (error.status >= 500) {
+    await sendTelegramAlert(`Critical error in eBay API: ${error.message}`);
+  }
+  
+  throw error;
+}
+```

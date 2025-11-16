@@ -1,0 +1,103 @@
+---
+description: Правила создания и управления n8n workflows
+globs: ["n8n-workflows/**/*.json"]
+alwaysApply: false
+---
+
+# Правила работы с n8n workflows
+
+## Структура workflow
+
+Каждый workflow должен:
+1. Иметь понятное название, отражающее его назначение
+2. Содержать описание в метаданных
+3. Использовать осмысленные имена для узлов
+4. Включать обработку ошибок
+
+## Версионирование
+
+- Все workflows должны экспортироваться в JSON и храниться в `n8n-workflows/`
+- Используйте понятные имена файлов: `product-sourcing.json`, `listing-creation.json`
+- Коммитьте изменения workflows в репозиторий для отслеживания истории
+
+## Обработка ошибков
+
+- Всегда добавляйте узлы для обработки ошибок
+- Используйте узлы "IF" для проверки результатов
+- Логируйте ошибки в Supabase
+- Отправляйте уведомления в Telegram для критических ошибок
+
+## Использование секретов
+
+- Используйте Credentials в n8n для хранения секретов
+- Не храните секреты в JSON файлах workflows
+- Документируйте какие credentials требуются для каждого workflow
+
+## Тестирование
+
+- Тестируйте workflows на тестовых данных перед продакшеном
+- Проверяйте все ветки выполнения (success и error paths)
+- Валидируйте входные и выходные данные
+
+## Документация
+
+- Каждый workflow должен быть задокументирован в `docs/KB_TECH_DOCS.md`
+- Включите описание:
+  - Назначение workflow
+  - Используемые узлы
+  - Требуемые credentials
+  - Обработка ошибок
+  - Примеры использования
+
+## Пример структуры
+
+```json
+{
+  "name": "Product Sourcing Workflow",
+  "nodes": [
+    {
+      "name": "Trigger",
+      "type": "n8n-nodes-base.cron",
+      "parameters": {
+        "rule": {
+          "interval": [{"field": "hours", "hoursInterval": 24}]
+        }
+      }
+    },
+    {
+      "name": "AutoDS Search",
+      "type": "n8n-nodes-base.httpRequest",
+      "parameters": {
+        "url": "https://api.autods.com/products/search",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      }
+    },
+    {
+      "name": "Handle Error",
+      "type": "n8n-nodes-base.if",
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "error",
+              "leftValue": "={{ $json.error }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "exists"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    }
+  ]
+}
+```

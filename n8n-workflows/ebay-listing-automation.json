@@ -1,0 +1,245 @@
+{
+  "name": "eBay Listing Automation",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ebay-listing",
+        "responseMode": "onReceived"
+      },
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://api.ebay.com/identity/v1/oauth2/token",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "grant_type",
+              "value": "client_credentials"
+            },
+            {
+              "name": "scope",
+              "value": "https://api.ebay.com/oauth/api_scope https://api.ebay.com/oauth/api_scope/sell.inventory https://api.ebay.com/oauth/api_scope/sell.fulfillment"
+            }
+          ]
+        }
+      },
+      "name": "Get eBay OAuth Token",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [450, 300],
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "ebay-oauth",
+          "name": "eBay OAuth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://api.ebay.com/sell/inventory/v1/inventory_item/={{ $json.body.sku }}",
+        "authentication": "predefinedCredentialType",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $node['Get eBay OAuth Token'].json.access_token }}"
+            },
+            {
+              "name": "Content-Language",
+              "value": "en-US"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "product",
+              "value": "={{ JSON.stringify($json.body.product) }}"
+            },
+            {
+              "name": "condition",
+              "value": "={{ $json.body.condition || 'NEW' }}"
+            },
+            {
+              "name": "availability",
+              "value": "={{ JSON.stringify($json.body.availability) }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "name": "Create Inventory Item",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://api.ebay.com/sell/inventory/v1/offer",
+        "authentication": "predefinedCredentialType",
+        "requestMethod": "POST",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $node['Get eBay OAuth Token'].json.access_token }}"
+            },
+            {
+              "name": "Content-Language",
+              "value": "en-US"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"sku\": \"{{ $json.body.sku }}\",\n  \"marketplaceId\": \"EBAY_US\",\n  \"format\": \"FIXED_PRICE\",\n  \"listingDescription\": \"{{ $json.body.description }}\",\n  \"availableQuantity\": {{ $json.body.quantity || 10 }},\n  \"pricingSummary\": {\n    \"price\": {\n      \"value\": \"{{ $json.body.price }}\",\n      \"currency\": \"USD\"\n    }\n  },\n  \"listingPolicies\": {\n    \"fulfillmentPolicyId\": \"{{ $json.body.fulfillmentPolicyId }}\",\n    \"paymentPolicyId\": \"{{ $json.body.paymentPolicyId }}\",\n    \"returnPolicyId\": \"{{ $json.body.returnPolicyId }}\"\n  }\n}"
+      },
+      "name": "Create Offer",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [850, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://api.ebay.com/sell/inventory/v1/offer/={{ $json.offerId }}/publish",
+        "authentication": "predefinedCredentialType",
+        "requestMethod": "POST",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $node['Get eBay OAuth Token'].json.access_token }}"
+            }
+          ]
+        }
+      },
+      "name": "Publish Listing",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1050, 300]
+    },
+    {
+      "parameters": {
+        "tableName": "listings",
+        "columns": "sku,ebay_listing_id,title,price,status,created_at",
+        "values": "={{ $json.body.sku }},={{ $json.listingId }},={{ $json.body.title }},={{ $json.body.price }},active,={{ new Date().toISOString() }}"
+      },
+      "name": "Save to Supabase",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [1250, 300],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "✅ New eBay Listing Created!\n\nSKU: {{ $json.body.sku }}\nTitle: {{ $json.body.title }}\nPrice: ${{ $json.body.price }}\nListing ID: {{ $json.listingId }}\n\nView: https://www.ebay.com/itm/{{ $json.listingId }}"
+      },
+      "name": "Telegram Notification",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [1450, 300],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram",
+          "name": "Telegram"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get eBay OAuth Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get eBay OAuth Token": {
+      "main": [
+        [
+          {
+            "node": "Create Inventory Item",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Inventory Item": {
+      "main": [
+        [
+          {
+            "node": "Create Offer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Offer": {
+      "main": [
+        [
+          {
+            "node": "Publish Listing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Publish Listing": {
+      "main": [
+        [
+          {
+            "node": "Save to Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save to Supabase": {
+      "main": [
+        [
+          {
+            "node": "Telegram Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

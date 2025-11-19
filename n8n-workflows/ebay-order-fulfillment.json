@@ -1,0 +1,247 @@
+{
+  "name": "eBay Order Fulfillment",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 15
+            }
+          ]
+        }
+      },
+      "name": "Check Orders Every 15min",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://api.ebay.com/sell/fulfillment/v1/order",
+        "authentication": "predefinedCredentialType",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $env.EBAY_USER_TOKEN }}"
+            }
+          ]
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "filter",
+              "value": "orderfulfillmentstatus:{NOT_STARTED|IN_PROGRESS}"
+            },
+            {
+              "name": "limit",
+              "value": "50"
+            }
+          ]
+        }
+      },
+      "name": "Get Unfulfilled Orders",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.orders?.length || 0 }}",
+              "operation": "larger",
+              "value2": 0
+            }
+          ]
+        }
+      },
+      "name": "Has Orders?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "orders",
+        "options": {}
+      },
+      "name": "Split Orders",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [850, 200]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Process each order and prepare for AutoDS\nconst order = $input.item.json;\n\nconst lineItems = order.lineItems.map(item => ({\n  sku: item.sku,\n  title: item.title,\n  quantity: item.quantity,\n  price: item.lineItemCost.value\n}));\n\nconst shippingAddress = order.fulfillmentStartInstructions[0]?.shippingStep?.shipTo;\n\nreturn [{\n  json: {\n    orderId: order.orderId,\n    buyerUsername: order.buyer.username,\n    orderTotal: order.pricingSummary.total.value,\n    currency: order.pricingSummary.total.currency,\n    lineItems: lineItems,\n    shippingAddress: {\n      name: shippingAddress?.fullName || '',\n      street1: shippingAddress?.contactAddress?.addressLine1 || '',\n      street2: shippingAddress?.contactAddress?.addressLine2 || '',\n      city: shippingAddress?.contactAddress?.city || '',\n      state: shippingAddress?.contactAddress?.stateOrProvince || '',\n      postalCode: shippingAddress?.contactAddress?.postalCode || '',\n      country: shippingAddress?.contactAddress?.countryCode || 'US'\n    },\n    createdAt: order.creationDate,\n    status: 'pending_fulfillment'\n  }\n}];"
+      },
+      "name": "Parse Order Data",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1050, 200]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "tableName": "orders",
+        "columns": "ebay_order_id,buyer_username,total,currency,line_items,shipping_address,status,created_at"
+      },
+      "name": "Save Order to Supabase",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [1250, 200],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://api.autods.com/v1/orders",
+        "authentication": "predefinedCredentialType",
+        "requestMethod": "POST",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"external_order_id\": \"{{ $json.orderId }}\",\n  \"items\": {{ JSON.stringify($json.lineItems) }},\n  \"shipping_address\": {{ JSON.stringify($json.shippingAddress) }},\n  \"marketplace\": \"ebay\"\n}"
+      },
+      "name": "Create AutoDS Order",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1450, 200],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "autods",
+          "name": "AutoDS API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "📦 New eBay Order!\n\nOrder ID: {{ $json.orderId }}\nBuyer: {{ $json.buyerUsername }}\nTotal: {{ $json.currency }} {{ $json.orderTotal }}\nItems: {{ $json.lineItems.length }}\n\nStatus: Sent to AutoDS for fulfillment"
+      },
+      "name": "Telegram - New Order",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [1650, 200],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram",
+          "name": "Telegram"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "ℹ️ No new orders to process"
+      },
+      "name": "Telegram - No Orders",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [850, 400],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram",
+          "name": "Telegram"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Check Orders Every 15min": {
+      "main": [
+        [
+          {
+            "node": "Get Unfulfilled Orders",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Unfulfilled Orders": {
+      "main": [
+        [
+          {
+            "node": "Has Orders?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Orders?": {
+      "main": [
+        [
+          {
+            "node": "Split Orders",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Telegram - No Orders",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Orders": {
+      "main": [
+        [
+          {
+            "node": "Parse Order Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Order Data": {
+      "main": [
+        [
+          {
+            "node": "Save Order to Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Order to Supabase": {
+      "main": [
+        [
+          {
+            "node": "Create AutoDS Order",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create AutoDS Order": {
+      "main": [
+        [
+          {
+            "node": "Telegram - New Order",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

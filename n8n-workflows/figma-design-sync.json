@@ -1,0 +1,205 @@
+{
+  "name": "Figma Design Sync",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 6
+            }
+          ]
+        }
+      },
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://api.figma.com/v1/files/{{ $env.FIGMA_FILE_KEY }}",
+        "authentication": "predefinedCredentialType",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Figma-Token",
+              "value": "={{ $env.FIGMA_ACCESS_TOKEN }}"
+            }
+          ]
+        }
+      },
+      "name": "Get Figma File",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Extract components and styles from Figma file\nconst figmaData = $input.item.json;\nconst components = [];\nconst styles = {\n  colors: [],\n  typography: [],\n  effects: []\n};\n\n// Extract color styles\nif (figmaData.styles) {\n  for (const [key, style] of Object.entries(figmaData.styles)) {\n    if (style.styleType === 'FILL') {\n      styles.colors.push({\n        name: style.name,\n        key: key\n      });\n    } else if (style.styleType === 'TEXT') {\n      styles.typography.push({\n        name: style.name,\n        key: key\n      });\n    } else if (style.styleType === 'EFFECT') {\n      styles.effects.push({\n        name: style.name,\n        key: key\n      });\n    }\n  }\n}\n\n// Extract components\nif (figmaData.components) {\n  for (const [key, component] of Object.entries(figmaData.components)) {\n    components.push({\n      name: component.name,\n      key: key,\n      description: component.description || ''\n    });\n  }\n}\n\nreturn [{\n  json: {\n    file_name: figmaData.name,\n    last_modified: figmaData.lastModified,\n    version: figmaData.version,\n    components: components,\n    styles: styles,\n    component_count: components.length,\n    color_count: styles.colors.length,\n    typography_count: styles.typography.length\n  }\n}];"
+      },
+      "name": "Parse Figma Data",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "operation": "upsert",
+        "tableName": "figma_sync",
+        "columns": "file_name,last_modified,version,component_count,color_count,typography_count,components,styles,synced_at",
+        "conflictColumns": "file_name"
+      },
+      "name": "Save to Supabase",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [850, 300],
+      "credentials": {
+        "supabaseApi": {
+          "id": "supabase",
+          "name": "Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.component_count }}",
+              "operation": "largerEqual",
+              "value2": 1
+            }
+          ]
+        }
+      },
+      "name": "Has Components?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1050, 300]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4-turbo-preview",
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "You are a design system analyzer. Analyze the Figma components and provide recommendations for:\n1. Missing components that should be added\n2. Naming inconsistencies\n3. Component organization improvements\n4. Design token suggestions\n\nRespond in JSON format with structure:\n{\n  \"recommendations\": [...],\n  \"priority\": \"high/medium/low\",\n  \"estimated_effort\": \"X hours\"\n}"
+            },
+            {
+              "role": "user",
+              "content": "Analyze this Figma design system:\n\nComponents: {{ JSON.stringify($json.components) }}\nColors: {{ $json.color_count }}\nTypography styles: {{ $json.typography_count }}\n\nProvide actionable recommendations."
+            }
+          ]
+        }
+      },
+      "name": "AI Design Analysis",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1,
+      "position": [1250, 200],
+      "credentials": {
+        "openAiApi": {
+          "id": "openai",
+          "name": "OpenAI"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "🎨 Figma Design Sync Complete!\n\nFile: {{ $json.file_name }}\nComponents: {{ $json.component_count }}\nColors: {{ $json.color_count }}\nTypography: {{ $json.typography_count }}\n\nLast Modified: {{ $json.last_modified }}"
+      },
+      "name": "Telegram - Sync Complete",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [1250, 400],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram",
+          "name": "Telegram"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get Figma File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Figma File": {
+      "main": [
+        [
+          {
+            "node": "Parse Figma Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Figma Data": {
+      "main": [
+        [
+          {
+            "node": "Save to Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save to Supabase": {
+      "main": [
+        [
+          {
+            "node": "Has Components?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Components?": {
+      "main": [
+        [
+          {
+            "node": "AI Design Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Telegram - Sync Complete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Design Analysis": {
+      "main": [
+        [
+          {
+            "node": "Telegram - Sync Complete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

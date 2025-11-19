@@ -1,0 +1,313 @@
+---
+title: "Dropshipping System – Cursor Rules"
+description: "Глобальные правила для AI в этом репозитории (Cursor 1 branch)."
+globs: ["*"]
+version: "1.0.2"
+updated: "2025-11-19"
+alwaysApply: true
+---
+
+# Project Context
+
+This repository contains an AI-driven dropshipping automation system.
+
+High-level goals:
+
+- Automate product sourcing, listing, pricing and order flows across marketplaces.
+- Use AI agents for analysis, refactoring and code generation, but keep architecture simple and maintainable.
+- Integrate securely with external APIs (eBay, Shopify, Supabase, Bitwarden CLI, etc.).
+
+Tech stack (current + target):
+
+- Backend: Node.js / TypeScript and/or Python scripts.
+- Automation layer: n8n (existing workflows) and, later, Make.com or other tools.
+- Secrets: Bitwarden CLI + `.env` files generated from it.
+- Databases: Supabase (PostgreSQL) or similar.
+- Marketplaces: eBay, Shopify, others later.
+- AI providers: OpenRouter (GPT-5.1, DeepSeek, Z.ai, Plama, Codex-style models, free models),
+  Anthropic (Claude), OpenAI.
+
+When working in this repository, ALWAYS assume that long-term maintainability and security
+are more important than short-term clever tricks.
+
+There are already documentation rules in:
+- docs/rules/
+- .cursor/rules/
+
+Do NOT override them; this file defines global project-level behaviour.
+
+---
+
+# Model Usage Guidelines
+
+These rules describe HOW different models should behave when they are the active engine
+behind Cursor.
+
+## GPT-5.1 / Next-Gen (Heavy / Architect)
+
+- Use only for:
+  - Multi-file refactors.
+  - Architecture changes.
+  - Complex migrations and agent-like tasks over the whole repo.
+- Always:
+  - Work deterministically (assume temperature ≈ 0–0.2).
+  - Start from ANALYSIS → PLAN → CHANGES → VERIFICATION.
+  - Limit scope to explicitly listed folders and files.
+- Do NOT:
+  - Rewrite the entire repo unless explicitly requested.
+  - Introduce new frameworks without clear justification.
+
+## Claude (Sonnet 3.5 / 3.7 / Opus / 4.1)
+
+- Primary roles:
+  - Deep code review, security and performance analysis.
+  - Explaining complex logic and design decisions.
+  - Drafting and improving documentation.
+- When used:
+  - First do a structured review (What is this? What is wrong? How to fix?).
+  - Only then propose small, precise patches.
+- Always explain trade-offs and potential side effects before suggesting changes.
+
+## DeepSeek (V3 / Coder)
+
+- Treat DeepSeek as a strong reasoning and coding engine.
+- Use it for:
+  - Performance optimizations.
+  - Algorithmic / mathematical logic.
+  - Large but well-scoped refactors.
+- Required workflow:
+  - Work in diff/patch style: show concrete before/after for each affected file.
+  - Do not touch files outside the described scope.
+  - Keep existing architecture and naming unless explicitly asked to change.
+
+## Z.ai (Large)
+
+- Main role:
+  - Bulk generation of services, API layers, and boilerplate modules.
+- When generating code:
+  - Use clean, layered / hexagonal architecture where possible.
+  - Keep configuration and credentials out of code (only through env / config).
+  - Avoid "magic" helpers that hide important logic.
+
+## Plama / Plama-Coder
+
+- Treat Plama as a reasoning-first assistant, then coder.
+- Use it for:
+  - Multi-step reasoning tasks: workflows, automation chains, orchestration.
+  - Designing prompt templates and agent flows.
+- Behaviour:
+  - Always separate: ANALYSIS → PLAN → IMPLEMENTATION.
+  - Output only final code or commands; internal reasoning stays hidden for the user.
+
+## Codex-Class Models (DeepSeek-Coder, Plama-Coder, etc.)
+
+- Use code-specialized models only for:
+  - Single-file implementations.
+  - Boilerplate code (handlers, DTOs, schemas, adapters).
+  - Small, iterative edits.
+- Rules:
+  - Work in "code only" mode: no long explanations, only short comments if needed.
+  - Never change architecture; only implement what is requested.
+  - Prefer one file per request unless explicitly asked for multiple.
+
+## Fast / Mini Models (gpt-4.1-mini / gpt-4o-mini, DeepSeek-Coder-mini, etc.)
+
+- Use for:
+  - Inline autocomplete and quick fixes.
+  - Small bug fixes with narrow context.
+  - Quick explanations and micro-refactors.
+- Do not:
+  - Perform large multi-file refactors.
+  - Make structural changes to the project.
+
+## Free Models (Qwen, Gemma, Mistral free)
+
+- Use only for:
+  - Non-critical tasks: translations, drafts, idea generation.
+  - Early brainstorming for prompts, docs, and comments.
+- Never:
+  - Handle secrets.
+  - Generate critical security, auth or payment code.
+  - Perform migrations or schema changes.
+
+---
+
+# Security & Data Privacy
+
+## Secrets Management
+
+- **Source of Truth:** Bitwarden CLI → `.env`.
+- **Strict Ban:** NEVER hardcode API keys, tokens, passwords, or webhook signing secrets.
+- **Detection:** If you see a hardcoded secret in existing code, immediately:
+  - Flag it clearly in your response.
+  - Refactor to use `process.env` (Node.js / TS) or equivalent env access in other languages.
+
+## Data Privacy (GDPR/CCPA)
+
+- **Context:** This is a dropshipping system handling real customer data.
+- **Logging:** NEVER log PII (Personally Identifiable Information), including but not limited to:
+  - Customer Names
+  - Email Addresses
+  - Physical Addresses
+  - Phone Numbers
+  - Any IDs that can be linked to a specific person
+- **Masking:** If logging order details, mask sensitive fields, for example:
+  - `email` → `e***@gmail.com`
+  - `phone` → `***1234`
+
+## Input Validation
+
+- All external inputs (webhooks from Shopify/eBay, user API requests, CLI JSON configs)
+  MUST be validated before processing.
+- Use:
+  - **Zod** (TypeScript) or
+  - **Pydantic** (Python)
+  for schema-based validation whenever possible.
+- Fail strictly:
+  - If the payload does not match the schema, reject it immediately and log a non-PII-safe error.
+
+## Database Security
+
+- **Supabase / PostgreSQL:**
+  - Always use Row Level Security (RLS) policies for any table holding user or order data.
+- **SQL:**
+  - Never use string concatenation for SQL queries.
+  - Always use parameterized queries or the official ORM / client library.
+- **Migrations:**
+  - Migration scripts must be reversible (up/down) and clearly documented.
+
+---
+
+# Coding Principles
+
+For all code in this repo:
+
+- Prefer simple, explicit, readable solutions over clever tricks.
+- Keep functions focused and small; avoid "god" modules.
+- Use consistent naming:
+  - Descriptive, lowercase_with_underscores or camelCase depending on the language.
+  - Avoid abbreviations unless they are standard in domain (SKU, API, VAT, etc.).
+- Error handling:
+  - Fail fast with clear error messages.
+  - Never silently swallow errors, especially around money and orders.
+- Tests:
+  - For non-trivial logic, add at least basic unit tests where feasible.
+  - New feature → at minimum a happy-path test.
+
+Always preserve existing style and conventions in the file, unless asked to refactor style explicitly.
+
+---
+
+# Repository-Specific Rules
+
+## Project Structure
+
+When working with or creating files, follow these guidelines (adapt names to actual structure):
+
+- `docs/` — documentation, knowledge base, setup guides (already present).
+- `n8n-workflows/` — workflow JSON definitions (already present).
+- `templates/notion/` — Notion export templates (already present).
+- `config/` — credentials templates, secrets structure, agent configs.
+- `scripts/` — CLI & setup scripts.
+- `scripts/setup/` — setup-related scripts.
+- `scripts/monitoring/` — monitoring-related scripts.
+- `tests/` — automated tests (create if/when needed).
+
+Never introduce new top-level folders without a clear reason and explanation.
+
+## Automation & Integrations
+
+- Make automation safe and idempotent:
+  - Scripts and workflows should be re-runnable without causing duplicate side effects.
+- When generating integration code:
+  - For eBay / Shopify / other APIs:
+    - Use official SDKs or documented HTTP endpoints.
+    - Respect rate limits and error handling patterns.
+  - For Supabase:
+    - Use typed clients where possible.
+    - Do not mix raw SQL and high-level clients in the same area unless necessary.
+
+---
+
+# Agent Behaviour in This Repo
+
+When acting as an "Agent" (multi-step modification of the repo):
+
+1. **Clarify task**
+   - Restate in your own words what you are going to do.
+   - List affected folders and files.
+
+2. **Scan relevant context**
+   - Only open/search files that are likely relevant.
+   - Do not scan the entire repo unless the user explicitly asks.
+
+3. **Plan**
+   - Propose a short step-by-step plan.
+   - Ask for confirmation ONLY if you are about to do risky or destructive changes.
+
+4. **Apply changes**
+   - Work in small, reviewable patches.
+   - Prefer creating new files over rewriting large existing ones without need.
+
+5. **Verify**
+   - Run available checks: linters, tests, type checks, if configured.
+   - Tell the user what was run and what the result was.
+
+6. **Summarize**
+   - Summarize changes at the end: what, where, why.
+
+Never auto-commit to Git. The human must always review diffs before committing.
+
+---
+
+# Git & Collaboration
+
+- Keep changes small and coherent.
+- For larger refactors:
+  - Propose branch naming and commit messages in Conventional Commits style, e.g.:
+    - `feat(pricing): add dynamic repricing for eBay`
+    - `refactor(integrations): extract common auth logic`
+- Always surface potential breaking changes and migrations clearly.
+
+---
+
+# Prompt Templates (for the human user)
+
+These are example prompt patterns that AI in Cursor should follow when requested.
+
+## Implement a Feature
+
+> Implement the following feature in a minimal, safe way:
+>
+> - Goal: …
+> - Constraints: …
+> - Affected areas: …
+>
+> Steps:
+> 1. Analyze current code.
+> 2. Propose a short plan.
+> 3. Implement changes in small patches.
+> 4. Show diffs for all touched files.
+
+## Fix a Bug
+
+> There is a bug:
+> - Description: …
+> - Expected: …
+> - Actual: …
+>
+> Tasks:
+> 1. Locate root cause.
+> 2. Propose fix.
+> 3. Apply minimal changes only.
+> 4. Add or update tests to cover the case.
+
+## Refactor
+
+> Refactor the following code for clarity and maintainability without changing behavior:
+> - Scope: [list of files]
+>
+> Rules:
+> - Preserve public interfaces.
+> - Keep changes incremental and well-structured.
+> - Do not introduce new dependencies unless necessary.
